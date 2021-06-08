@@ -66,15 +66,15 @@ function select_cuda_platform(download_info::Dict, platform::AbstractPlatform = 
 
     # chose the most recent CUDA version
     p = last(sort(ps, by = p -> parse(VersionNumber, p.tags["cuda"])))
-    return download_info[p]
+    return download_info[p], parse(VersionNumber, p.tags["cuda"])
 end
 
 
-global best_wrapper
+global best_wrapper, toolkit_version
 # Load Artifacts.toml file and select best platform at compile-time, since this is
 # running at toplevel, and therefore will be run completely at compile-time.  We use
 # a `let` block here to avoid storing unnecessary data in our `.ji` files
-best_wrapper = let
+best_wrapper, toolkit_version = let
     artifacts_toml = joinpath(@__DIR__, "..", "Artifacts.toml")
     valid_wrappers = Dict{Platform,String}()
     artifacts = load_artifacts_toml(artifacts_toml; pkg_uuid=UUID("6e453f8e-2bea-4beb-930a-5f3197ca40e4"))["CUDA_Toolkit"]
@@ -120,9 +120,11 @@ end
 if best_wrapper === nothing
     @debug(string("Unable to load ", "CUDA_Toolkit", "; unsupported platform ", triplet(HostPlatform())))
     is_available() = false
+    version() = nothing
 else
     Base.include(CUDA_Toolkit_jll, best_wrapper)
     is_available() = true
+    version() = toolkit_version # XXX: set this in each wrapper, maybe also exposing the full version
 end
 
 
