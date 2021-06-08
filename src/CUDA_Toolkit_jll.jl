@@ -1,7 +1,7 @@
 # Use baremodule to shave off a few KB from the serialized `.ji` file
 baremodule CUDA_Toolkit_jll
 using Base
-using Base: UUID
+using Base: UUID, thisminor, thismajor
 using LazyArtifacts
 import JLLWrappers
 
@@ -24,6 +24,39 @@ const LIBPATH_list = String[]
 
 # We sub off to JLLWrappers' dev_jll, but avoid backedges
 dev_jll() = Base.invokelatest(JLLWrappers.dev_jll, "CUDA_Toolkit")
+
+const libcuda = Sys.iswindows() ? "nvcuda" : ( Sys.islinux() ? "libcuda.so.1" : "libcuda" )
+function cuDriverGetVersion()
+    version_ref = Ref{Cint}()
+    status = ccall((:cuDriverGetVersion, libcuda), Cuint,
+                   (Ptr{Cint},), version_ref)
+    @assert status == 0
+    major, ver = divrem(version_ref[], 1000)
+    minor, patch = divrem(ver, 10)
+    return VersionNumber(major, minor, patch)
+end
+
+function select_cuda_platform(download_info::Dict, platform::AbstractPlatform = HostPlatform())
+    ps = collect(filter(p -> platforms_match(p, platform), keys(download_info)))
+
+    # select compatible CUDA versions
+    driver_version = cuDriverGetVersion()
+    filter!(ps) do p
+        @assert haskey(p.tags, "cuda")
+        toolkit_version = parse(VersionNumber, p.tags["cuda"])
+        # CUDA 11+ supports semantic versioning (dubbed Enhanced Compatibility)
+        driver_version >= v"11" ? thismajor(toolkit_version) <= thismajor(driver_version) :
+                                  thisminor(toolkit_version) <= thisminor(driver_version)
+    end
+
+    if isempty(ps)
+        return nothing
+    end
+
+    # chose the most recent CUDA version
+    p = last(sort(ps, by = p -> parse(VersionNumber, p.tags["cuda"])))
+    return download_info[p]
+end
 
 
 global best_wrapper
@@ -68,7 +101,7 @@ best_wrapper = let
         end
 
         # From the available options, choose the best wrapper script
-        select_platform(valid_wrappers)
+        select_cuda_platform(valid_wrappers)
     end
 end
 
