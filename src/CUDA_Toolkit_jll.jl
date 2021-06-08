@@ -3,6 +3,7 @@ baremodule CUDA_Toolkit_jll
 using Base
 using Base: UUID, thisminor, thismajor
 using LazyArtifacts
+using Preferences
 import JLLWrappers
 
 JLLWrappers.@generate_main_file_header("CUDA_Toolkit")
@@ -39,14 +40,24 @@ end
 function select_cuda_platform(download_info::Dict, platform::AbstractPlatform = HostPlatform())
     ps = collect(filter(p -> platforms_match(p, platform), keys(download_info)))
 
-    # select compatible CUDA versions
-    driver_version = cuDriverGetVersion()
-    filter!(ps) do p
-        @assert haskey(p.tags, "cuda")
-        toolkit_version = parse(VersionNumber, p.tags["cuda"])
-        # CUDA 11+ supports semantic versioning (dubbed Enhanced Compatibility)
-        driver_version >= v"11" ? thismajor(toolkit_version) <= thismajor(driver_version) :
-                                  thisminor(toolkit_version) <= thisminor(driver_version)
+    if @has_preference("version")
+        # select requested CUDA version
+        preferred_version = parse(VersionNumber, @load_preference("version"))
+        filter!(ps) do p
+            @assert haskey(p.tags, "cuda")
+            toolkit_version = parse(VersionNumber, p.tags["cuda"])
+            thisminor(toolkit_version) == thisminor(preferred_version)
+        end
+    else
+        # select compatible CUDA versions
+        driver_version = cuDriverGetVersion()
+        filter!(ps) do p
+            @assert haskey(p.tags, "cuda")
+            toolkit_version = parse(VersionNumber, p.tags["cuda"])
+            # CUDA 11+ supports semantic versioning (dubbed Enhanced Compatibility)
+            driver_version >= v"11" ? thismajor(toolkit_version) <= thismajor(driver_version) :
+                                      thisminor(toolkit_version) <= thisminor(driver_version)
+        end
     end
 
     if isempty(ps)
